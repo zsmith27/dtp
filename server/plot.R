@@ -17,7 +17,7 @@ output$plot1 <- renderPlot({
                         dichotomous.col = input$feature.col,
                         dichotomous.vec = input$feature.vec,
                         taxa.col = input$taxa.col,
-                        value.col = "value",
+                        value.col = "median",
                         coord.flip = if_else(input$orientation == "Vertical", TRUE, FALSE)
   )
 })

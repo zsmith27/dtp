@@ -4,7 +4,6 @@ library(shinydashboard)
 library(tidyverse)
 library(rlang)
 
-# Define UI for application that draws a histogram
 ui <- dashboardPage(
   dashboardHeader(title = "Beta"),
   dashboardSidebar(
@@ -37,7 +36,6 @@ ui <- dashboardPage(
                       "))),
     #fillPage(
       #DT::dataTableOutput('table1')
-    
       tags$style(type = "text/css", "#plot1 {height: calc(100vh - 80px) !important;}"),
       plotOutput("plot1")
     #)
