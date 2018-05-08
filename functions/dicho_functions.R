@@ -20,22 +20,75 @@ percentage <- function(long.df, site.col, dichotomous.col, taxa.col, count.col) 
            !!rlang::quo_name(dichotomous.col) := "dicho")
 }
 #------------------------------------------------------------------------------
-calc_stat <- function(long.df, dichotomous.col, dichotomous.vec, taxa.col, value.col, stat.funs) {
+calc_stat <- function(long.df, dichotomous.col, dichotomous.vec, taxa.col, value.col) {
   dichotomous.col <- rlang::enquo(dichotomous.col)
   taxa.col <- rlang::enquo(taxa.col)
   value.col <- rlang::enquo(value.col)
   
   final.df <- long.df %>% 
     group_by(!!dichotomous.col, !!taxa.col) %>% 
-    summarize(value = stat.funs(!!value.col)) %>% 
+    summarize(median = median(!!value.col),
+              quant25 = quantile(!!value.col, 0.25),
+              quant75 = quantile(!!value.col, 0.75)) 
+  
+}
+#------------------------------------------------------------------------------
+organize_stat <- function(long.df, dichotomous.col, dichotomous.vec, taxa.col) {
+  dichotomous.col <- rlang::enquo(dichotomous.col)
+  taxa.col <- rlang::enquo(taxa.col)
+  
+  final.df <- long.df %>% 
+    tidyr::unite("value", c("median", "quant25", "quant75")) %>% 
     spread(!!dichotomous.col, value) %>% 
-    mutate(diff = !!rlang::sym(dichotomous.vec[[2]]) - !!rlang::sym(dichotomous.vec[[1]]), 
+    separate(!!rlang::sym(dichotomous.vec[[2]]),
+             c(paste(dichotomous.vec[[2]], "median", sep = "_"),
+               paste(dichotomous.vec[[2]], "quant25", sep = "_"),
+               paste(dichotomous.vec[[2]], "quant75", sep = "_")
+             ), "_", convert = TRUE) %>% 
+    separate(!!rlang::sym(dichotomous.vec[[1]]),
+             c(paste(dichotomous.vec[[1]], "median", sep = "_"),
+               paste(dichotomous.vec[[1]], "quant25", sep = "_"),
+               paste(dichotomous.vec[[1]], "quant75", sep = "_")
+             ), "_", convert = TRUE) %>% 
+    mutate(median_diff = !!rlang::sym(paste(dichotomous.vec[[2]], "median", sep = "_")) - 
+             !!rlang::sym(paste(dichotomous.vec[[1]], "median", sep = "_")),
+           diff = case_when(
+             median_diff < 0 ~ !!rlang::sym(paste(dichotomous.vec[[1]], "quant25", sep = "_")) - 
+               !!rlang::sym(paste(dichotomous.vec[[2]], "quant75", sep = "_")),
+             median_diff > 0 ~ !!rlang::sym(paste(dichotomous.vec[[2]], "quant25", sep = "_")) - 
+               !!rlang::sym(paste(dichotomous.vec[[1]], "quant75", sep = "_")),
+             median_diff == 0 ~ 0,
+             TRUE ~ 100000000
+           ),
+           diff = median_diff,
            rank = rank(diff, ties.method = "first")) %>% 
-    #filter(abs(diff) >= diff.thresh) %>% 
+    unite(!!rlang::sym(dichotomous.vec[[1]]), 
+          c(paste(dichotomous.vec[[1]], "median", sep = "_"),
+            paste(dichotomous.vec[[1]], "quant25", sep = "_"),
+            paste(dichotomous.vec[[1]], "quant75", sep = "_"))) %>% 
+    unite(!!rlang::sym(dichotomous.vec[[2]]), 
+          c(paste(dichotomous.vec[[2]], "median", sep = "_"),
+            paste(dichotomous.vec[[2]], "quant25", sep = "_"),
+            paste(dichotomous.vec[[2]], "quant75", sep = "_"))) %>% 
     gather(!!dichotomous.col, value, dichotomous.vec) %>% 
     arrange(rank) %>% 
-    mutate(!!rlang::quo_name(taxa.col) := factor(!!taxa.col, levels = unique(!!taxa.col)))
+    mutate(!!rlang::quo_name(taxa.col) := factor(!!taxa.col, levels = unique(!!taxa.col))) %>% 
+    separate("value", c("median", "quant25", "quant75"), "_", convert = TRUE)
+}
+#------------------------------------------------------------------------------
+dichotomous_summary <- function(long.df, 
+                                dichotomous.col, dichotomous.vec, 
+                                site.col, taxa.col, count.col) {
+  site.col <- rlang::sym(site.col)
+  dichotomous.col <- rlang::sym(dichotomous.col)
+  taxa.col <- rlang::sym(taxa.col)
+  count.col <- rlang::sym(count.col)
   
+  final.df <- long.df %>% 
+    filter((!!dichotomous.col) %in% dichotomous.vec) %>% 
+    percentage(!!site.col, !!dichotomous.col, !!taxa.col, !!count.col) %>% 
+    calc_stat(!!dichotomous.col, dichotomous.vec, !!taxa.col, percent) %>% 
+    organize_stat(!!dichotomous.col, dichotomous.vec, !!taxa.col)
 }
 #------------------------------------------------------------------------------
 dichotomous_taxa_plot <- function(long.df, dichotomous.col, dichotomous.vec, taxa.col, value.col,
@@ -51,11 +104,11 @@ dichotomous_taxa_plot <- function(long.df, dichotomous.col, dichotomous.vec, tax
                       group = dplyr::quo_name(dichotomous.col),
                       fill = dplyr::quo_name(dichotomous.col),
                       color = dplyr::quo_name(dichotomous.col))) +
-    geom_ribbon(aes(ymin = 0,
-                    ymax = value),
-                alpha= 0.3) +
-    #geom_area(position = "stack", stat = "identity", alpha = 0.5) +
-    #geom_point() +
+    geom_ribbon(aes(ymin = quant25,
+                    ymax = quant75),
+                alpha = 0.2,
+                linetype = 0) +
+    geom_line(size = 1) +
     theme(axis.text = element_text(size = 20),
           axis.title = element_text(size = 20, face = "bold"),
           legend.text = element_text(size = 15, face = NULL),
@@ -71,20 +124,4 @@ dichotomous_taxa_plot <- function(long.df, dichotomous.col, dichotomous.vec, tax
     return(final.plot)
 }
 #------------------------------------------------------------------------------
-dichotomous_summary <- function(long.df, 
-                                dichotomous.col, dichotomous.vec, 
-                                site.col, taxa.col, count.col,
-                                diff.thresh) {
-  site.col <- rlang::sym(site.col)
-  dichotomous.col <- rlang::sym(dichotomous.col)
-  taxa.col <- rlang::sym(taxa.col)
-  count.col <- rlang::sym(count.col)
-  #coord.flip <- if_else(orientation == "Vertical", TRUE, FALSE)
-  
-  long.df %>% 
-    filter((!!dichotomous.col) %in% dichotomous.vec) %>% 
-    percentage(!!site.col, !!dichotomous.col, !!taxa.col, !!count.col) %>% 
-    calc_stat(!!dichotomous.col, dichotomous.vec, !!taxa.col, percent, median) #%>% 
-     # dichotomous_taxa_plot(!!dichotomous.col, dichotomous.vec, !!taxa.col, value,
-     #                       coord.flip)
-}
+

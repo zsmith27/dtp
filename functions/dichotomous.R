@@ -1,6 +1,6 @@
 original.df <- data.table::fread("data/ny_fish.csv")
 
-long.df <- original.df
+long.df<- original.df
 dichotomous.col <- "basin"
 dichotomous.vec <- unique(original.df$basin)[1:2]
 site.col <- "site"
@@ -25,21 +25,61 @@ percentage <- function(long.df, site.col, dichotomous.col, taxa.col, count.col) 
     select(-(!!count.col), -total)
 }
 #------------------------------------------------------------------------------
-calc_stat <- function(long.df, dichotomous.col, dichotomous.vec, taxa.col, value.col, stat.funs) {
+
+calc_stat <- function(long.df, dichotomous.col, dichotomous.vec, taxa.col, value.col) {
   dichotomous.col <- rlang::enquo(dichotomous.col)
   taxa.col <- rlang::enquo(taxa.col)
   value.col <- rlang::enquo(value.col)
   
   final.df <- long.df %>% 
     group_by(!!dichotomous.col, !!taxa.col) %>% 
-    summarize(value = stat.funs(!!value.col)) %>% 
-    spread(!!dichotomous.col, value) %>% 
-    mutate(diff = !!rlang::sym(dichotomous.vec[[2]]) - !!rlang::sym(dichotomous.vec[[1]]), 
+    summarize(median = median(!!value.col),
+              quant25 = quantile(!!value.col, 0.25),
+              quant75 = quantile(!!value.col, 0.75)) 
+              
+}
+#------------------------------------------------------------------------------
+organize_stat <- function(long.df, dichotomous.col, dichotomous.vec, taxa.col) {
+  dichotomous.col <- rlang::enquo(dichotomous.col)
+  taxa.col <- rlang::enquo(taxa.col)
+  
+  final.df <- long.df %>% 
+    tidyr::unite("value", c("median", "quant25", "quant75")) %>% 
+  spread(!!dichotomous.col, value) %>% 
+    separate(!!rlang::sym(dichotomous.vec[[2]]),
+             c(paste(dichotomous.vec[[2]], "median", sep = "_"),
+               paste(dichotomous.vec[[2]], "quant25", sep = "_"),
+               paste(dichotomous.vec[[2]], "quant75", sep = "_")
+               ), "_", convert = TRUE) %>% 
+    separate(!!rlang::sym(dichotomous.vec[[1]]),
+             c(paste(dichotomous.vec[[1]], "median", sep = "_"),
+               paste(dichotomous.vec[[1]], "quant25", sep = "_"),
+               paste(dichotomous.vec[[1]], "quant75", sep = "_")
+             ), "_", convert = TRUE) %>% 
+    mutate(median_diff = !!rlang::sym(paste(dichotomous.vec[[2]], "median", sep = "_")) - 
+             !!rlang::sym(paste(dichotomous.vec[[1]], "median", sep = "_")),
+           diff = case_when(
+             median_diff < 0 ~ !!rlang::sym(paste(dichotomous.vec[[1]], "quant25", sep = "_")) - 
+               !!rlang::sym(paste(dichotomous.vec[[2]], "quant75", sep = "_")),
+             median_diff > 0 ~ !!rlang::sym(paste(dichotomous.vec[[2]], "quant25", sep = "_")) - 
+               !!rlang::sym(paste(dichotomous.vec[[1]], "quant75", sep = "_")),
+             median_diff == 0 ~ 0,
+             TRUE ~ 100000000
+           ),
+           diff = median_diff,
            rank = rank(diff, ties.method = "first")) %>% 
+    unite(!!rlang::sym(dichotomous.vec[[1]]), 
+          c(paste(dichotomous.vec[[1]], "median", sep = "_"),
+            paste(dichotomous.vec[[1]], "quant25", sep = "_"),
+            paste(dichotomous.vec[[1]], "quant75", sep = "_"))) %>% 
+    unite(!!rlang::sym(dichotomous.vec[[2]]), 
+          c(paste(dichotomous.vec[[2]], "median", sep = "_"),
+            paste(dichotomous.vec[[2]], "quant25", sep = "_"),
+            paste(dichotomous.vec[[2]], "quant75", sep = "_"))) %>% 
     gather(!!dichotomous.col, value, dichotomous.vec) %>% 
     arrange(rank) %>% 
-    mutate(!!rlang::quo_name(taxa.col) := factor(!!taxa.col, levels = unique(!!taxa.col)))
-              
+    mutate(!!rlang::quo_name(taxa.col) := factor(!!taxa.col, levels = unique(!!taxa.col))) %>% 
+    separate("value", c("median", "quant25", "quant75"), "_", convert = TRUE)
 }
 #------------------------------------------------------------------------------
 dichotomous_summary <- function(long.df, 
@@ -50,15 +90,33 @@ dichotomous_summary <- function(long.df,
   taxa.col <- rlang::sym(taxa.col)
   count.col <- rlang::sym(count.col)
   
-  long.df %>% 
+  final.df <- long.df %>% 
     filter((!!dichotomous.col) %in% dichotomous.vec) %>% 
     percentage(!!site.col, !!dichotomous.col, !!taxa.col, !!count.col) %>% 
-    calc_stat(!!dichotomous.col, dichotomous.vec, !!taxa.col, percent, median) %>% 
-    dichotomous_taxa_plot(!!dichotomous.col, dichotomous.vec, !!taxa.col, value)
+    calc_stat(!!dichotomous.col, dichotomous.vec, !!taxa.col, percent) %>% 
+    organize_stat(!!dichotomous.col, dichotomous.vec, !!taxa.col)
 }
 
-test <- dichotomous_summary(input.df, "basin", unique(input.df$basin)[c(1,4)],
-                            "site", "vernacular_name", "count", 0)
+test <- dichotomous_summary(original.df, "basin", unique(original.df$basin)[c(1,4)],
+                            "site", "vernacular_name", "count")
+dichotomous.col <- quo(basin)
+taxa.col <- quo(vernacular_name)
+value.col <- quo(median)
+test %>% 
+  arrange(!!dichotomous.col) %>% 
+  ggplot(aes_string(x = dplyr::quo_name(taxa.col),
+                    y = dplyr::quo_name(value.col),
+                    group = dplyr::quo_name(dichotomous.col),
+                    fill = dplyr::quo_name(dichotomous.col),
+                    color = dplyr::quo_name(dichotomous.col))) +
+  geom_ribbon(aes(ymin = quant25,
+                  ymax = quant75),
+              alpha= 0.3, linetype = 0) +
+  geom_line(size = 1) +
+  #geom_area(position = "stack", stat = "identity", alpha = 0.5) +
+  #geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  coord_flip()
 
 dichotomous_taxa_plot(test, "basin", c("chesapeake", "Mississippi"), "vernacular_name", )
 dichotomous.col <- quo(basin)
