@@ -1,0 +1,12 @@
+name: dtp_beta
+title: dtp_beta
+username:
+account: zsmith
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 338858
+bundleId: 1361111
+url: https://zsmith.shinyapps.io/dtp_beta/
+when: 1525732046.29982
+asMultiple: FALSE
+asStatic: FALSE
